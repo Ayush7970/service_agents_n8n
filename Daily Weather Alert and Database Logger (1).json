@@ -1,0 +1,510 @@
+{
+  "name": "Daily Weather Alert and Database Logger",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "51377090-546f-4fb9-8da4-f6c6ff0ac8a1",
+      "name": "01 Cron",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -3712,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-2",
+              "name": "units",
+              "value": "metric",
+              "type": "string"
+            },
+            {
+              "id": "id-3",
+              "name": "temperature_unit",
+              "value": "C",
+              "type": "string"
+            },
+            {
+              "id": "id-4",
+              "name": "heat_c",
+              "value": 32,
+              "type": "number"
+            },
+            {
+              "id": "id-5",
+              "name": "frost_c",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "2d6346ad-9e13-4d49-82ad-0db3633cd4e2",
+              "name": "WEATHER_API_KEY",
+              "value": "ff420a1bdcf5c319770882c1598fd8d3",
+              "type": "string"
+            },
+            {
+              "id": "id-6",
+              "name": "cities",
+              "value": "[\"Chicago\", \"New York\", \"San Francisco\"]",
+              "type": "array"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "include": "selected",
+        "options": {}
+      },
+      "id": "b1c8442a-04d7-43bd-872d-0f8e5740ac05",
+      "name": "02 Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3488,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openweathermap.org/data/2.5/weather",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.cities }}"
+            },
+            {
+              "name": "appid",
+              "value": "={{ $json.WEATHER_API_KEY }}"
+            },
+            {
+              "name": "units",
+              "value": "={{ $json.units }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "e51b3017-a3f2-44e7-9667-d878a1582a19",
+      "name": "03 Weather API Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -2832,
+        768
+      ],
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst out = [];\n\nfor (const item of items) {\n  const weatherData = item.json;\n\n  // Prefer config carried through the flow; fallback to explicit node lookup\n  const cfg = item.json?.city ? item.json : ($('02 Config').first()?.json ?? {});\n  const temperatureUnit = cfg.temperature_unit ?? 'C';\n\n  out.push({\n    json: {\n      city: weatherData.name ?? cfg.city ?? 'Unknown',\n      temperature: Number(weatherData.main?.temp),\n      condition: weatherData.weather?.[0]?.description ?? 'unknown',\n      humidity: weatherData.main?.humidity ?? null,\n      wind_speed: weatherData.wind?.speed ?? null,\n      temperature_unit: temperatureUnit,\n      raw_response: weatherData,\n      OPENWEATHER_API_KEY: cfg.OPENWEATHER_API_KEY,\n      SUPABASE_SERVICE_ROLE_KEY: cfg.SUPABASE_SERVICE_ROLE_KEY,\n    }\n  });\n}\nreturn out;\n"
+      },
+      "id": "c334d62f-c1f6-4b40-a1bc-56d55a761731",
+      "name": "04 Data Normalization",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2608,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nconst configData = $('02 Config').first()?.json ?? {};\nconst heat_c = configData.heat_c ?? 32;\nconst frost_c = configData.frost_c ?? 0;\n\nfor (const item of items) {\n  const condition = (item.json.condition || \"\").toLowerCase();\n  const temperature = Number(item.json.temperature);\n\n  let alert_type = \"none\";\n\n  if (\n    condition.includes(\"rain\") ||\n    condition.includes(\"snow\") ||\n    condition.includes(\"drizzle\") ||\n    condition.includes(\"storm\") ||\n    condition.includes(\"thunder\")\n  ) {\n    alert_type = \"precipitation\";\n  } else if (!Number.isNaN(temperature) && temperature > heat_c) {\n    alert_type = \"heat\";\n  } else if (!Number.isNaN(temperature) && temperature < frost_c) {\n    alert_type = \"frost\";\n  }\n\n  results.push({ \n    json: { \n      ...item.json, \n      alert_type,\n      OPENWEATHER_API_KEY: configData.OPENWEATHER_API_KEY,\n      SUPABASE_SERVICE_ROLE_KEY: configData.SUPABASE_SERVICE_ROLE_KEY\n    } \n  });\n}\n\nreturn results;\n"
+      },
+      "id": "c0ed5cbb-c0fb-438c-98fe-7ff53b1736c6",
+      "name": "05 Weather Alert Logic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2384,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate email subject and body with formatted weather details\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const data = item.json;\n\n  const city = data.city ?? \"Unknown\";\n  const date = new Date().toISOString().split(\"T\")[0];\n\n  const temperature = data.temperature ?? \"N/A\";\n  const tempUnit = data.temperature_unit ?? \"C\";\n  const condition = data.condition ?? \"Unknown\";\n  const humidity = data.humidity ?? \"N/A\";\n  const windSpeed = data.wind_speed ?? \"N/A\";\n  const alertType = data.alert_type ?? \"none\";\n\n  // Timestamp for DB logging\n  const run_at = new Date().toISOString();\n\n  let alertMessage = \"No alerts\";\n  if (alertType === \"precipitation\") {\n    alertMessage = \"⚠️ Precipitation Alert: Rain, snow, or storms expected. Bring an umbrella!\";\n  } else if (alertType === \"heat\") {\n    alertMessage = \"🌡️ Heat Alert: High temperatures detected. Stay hydrated and avoid prolonged sun exposure.\";\n  } else if (alertType === \"frost\") {\n    alertMessage = \"❄️ Frost Alert: Freezing temperatures detected. Protect sensitive plants and pipes.\";\n  }\n\n  const email_subject = `Daily Weather for ${city} – ${date}`;\n\n  const email_body = `\nDaily Weather Report\n====================\n\nCity: ${city}\nDate: ${date}\n\nCurrent Conditions:\n- Temperature: ${temperature}°${tempUnit}\n- Condition: ${condition}\n- Humidity: ${humidity}%\n- Wind Speed: ${windSpeed} m/s\n\nAlert Status:\n${alertMessage}\n\n---\nThis is an automated weather report.\n  `.trim();\n\n  // Get API keys from previous nodes\n  const configData = $('02 Config').first()?.json ?? {};\n  const OPENWEATHER_API_KEY = data.OPENWEATHER_API_KEY ?? configData.OPENWEATHER_API_KEY ?? \"\";\n  const SUPABASE_SERVICE_ROLE_KEY = data.SUPABASE_SERVICE_ROLE_KEY ?? configData.SUPABASE_SERVICE_ROLE_KEY ?? \"\";\n\n  results.push({\n    json: {\n      ...data,\n      run_at,\n      email_subject,\n      email_body,\n      OPENWEATHER_API_KEY,\n      SUPABASE_SERVICE_ROLE_KEY,\n    },\n  });\n}\n\nreturn results;\n"
+      },
+      "id": "6589d710-ce79-4d52-ac09-c1142c65e4f3",
+      "name": "06 Summary Formatting",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2160,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ctokdlhxrtgerxsukask.supabase.co/rest/v1/weather_logs",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "run_at",
+              "value": "={{$json.run_at}}"
+            },
+            {
+              "name": "city",
+              "value": "={{$json.city}}"
+            },
+            {
+              "name": "temperature",
+              "value": "={{ $json.temperature }}"
+            },
+            {
+              "name": "temperature_unit",
+              "value": "={{ $json.temperature_unit }}"
+            },
+            {
+              "name": "condition",
+              "value": "={{$json.condition}}"
+            },
+            {
+              "name": "humidity",
+              "value": "={{$json.humidity}}"
+            },
+            {
+              "name": "wind_speed",
+              "value": "={{$json.wind_speed}}"
+            },
+            {
+              "name": "alert_type",
+              "value": "={{ $json.alert_type }}"
+            },
+            {
+              "name": "raw_response",
+              "value": "={{ $json.raw_response }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8c362fb9-dea8-4ed3-a15d-67a56a91c5a9",
+      "name": "07 Supabase Insert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1936,
+        768
+      ],
+      "retryOnFail": false,
+      "credentials": {
+        "supabaseApi": {
+          "id": "oZXDT1Spr3jmL6mh",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ctokdlhxrtgerxsukask.supabase.co/rest/v1/workflow_logs",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"run_at\": \"={{ new Date().toISOString() }}\",\n  \"status\": \"error\",\n  \"workflow_name\": \"={{ $workflow.name }}\",\n  \"execution_id\": \"={{ $execution.id }}\",\n  \"error_message\": \"\",\n  \"node\": \"Logging Error\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1488,
+        672
+      ],
+      "id": "5ac74a53-7f8e-4cff-ab93-081b2f009767",
+      "name": "Logging Errors",
+      "credentials": {
+        "supabaseApi": {
+          "id": "oZXDT1Spr3jmL6mh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ctokdlhxrtgerxsukask.supabase.co/rest/v1/workflow_logs",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"run_at\": \"={{new Date().toISOString()}}\",\n  \"status\": \"success\",\n  \"workflow_name\": \"Daily Weather Alert\",\n  \"execution_id\": \"={{$execution.id}}\",\n  \"error_message\": null,\n  \"node\": \"Logging Success\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1264,
+        864
+      ],
+      "id": "fda3420a-4190-4c71-a208-1fc650ee1b03",
+      "name": "Logging Success",
+      "credentials": {
+        "supabaseApi": {
+          "id": "oZXDT1Spr3jmL6mh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "ayush975600@gmail.com",
+        "toEmail": "abhard24@uic.edu",
+        "subject": "={{`Daily Weather for ${$json.city} – ${$json.run_at.split('T')[0]}`}}\n",
+        "html": "={{(() => {\n  const city =\n    $json.city ?? $json.name ?? ($json.raw_response && $json.raw_response.name) ?? \"—\";\n\n  const runAt = $json.run_at ?? \"\";\n  const dateStr = (typeof runAt === \"string\" && runAt.includes(\"T\"))\n    ? runAt.split(\"T\")[0]\n    : new Date().toISOString().split(\"T\")[0];\n\n  const main = $json.main ?? ($json.raw_response && $json.raw_response.main) ?? {};\n  const windObj = $json.wind ?? ($json.raw_response && $json.raw_response.wind) ?? {};\n  const weatherArr = $json.weather ?? ($json.raw_response && $json.raw_response.weather) ?? [];\n\n  const temp = $json.temperature ?? main.temp;\n  const feelsLike = main.feels_like;\n  const tempMin = main.temp_min;\n  const tempMax = main.temp_max;\n  const humidity = $json.humidity ?? main.humidity;\n  const pressure = main.pressure;\n  const visibility = $json.visibility ?? ($json.raw_response && $json.raw_response.visibility);\n  const windSpeed = $json.wind_speed ?? windObj.speed;\n  const windGust = windObj.gust;\n\n  const condition =\n    $json.condition ??\n    (weatherArr[0] && (weatherArr[0].description ?? weatherArr[0].main)) ??\n    \"—\";\n\n  const alertType = $json.alert_type ?? \"none\";\n  const alertLabel = (alertType && alertType !== \"none\") ? alertType : \"No alerts\";\n\n  const fmt = (v, suffix = \"\") =>\n    (v === undefined || v === null || v === \"\") ? \"—\" : `${v}${suffix}`;\n\n  return `<!doctype html>\n<html>\n  <head>\n    <meta charset=\"utf-8\" />\n  </head>\n  <body style=\"margin:0;padding:0;background:#f5f6fa;font-family:Arial,Helvetica,sans-serif;color:#111827;\">\n    <div style=\"max-width:720px;margin:0 auto;padding:24px;\">\n      <div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:16px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,0.05);\">\n\n        <!-- Header -->\n        <div style=\"display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;\">\n          <div>\n            <div style=\"font-size:18px;font-weight:800;line-height:1.2;\">Daily Weather Report</div>\n            <div style=\"margin-top:6px;font-size:12px;color:#6b7280;\">\n              ${city} • ${dateStr}\n            </div>\n          </div>\n          <div style=\"padding:8px 12px;border-radius:999px;background:#eef2ff;border:1px solid #e0e7ff;color:#3730a3;font-size:12px;font-weight:700;\">\n            Daily Summary\n          </div>\n        </div>\n\n        <hr style=\"border:none;border-top:1px solid #e5e7eb;margin:18px 0;\" />\n\n        <!-- Hero -->\n        <div style=\"display:flex;align-items:center;gap:14px;flex-wrap:wrap;\">\n          <div style=\"font-size:40px;font-weight:900;letter-spacing:-0.5px;\">\n            ${fmt(temp, \"°C\")}\n          </div>\n          <div>\n            <div style=\"font-size:14px;font-weight:800;text-transform:capitalize;\">${condition}</div>\n            <div style=\"margin-top:4px;font-size:12px;color:#6b7280;\">\n              Feels like: <strong style=\"color:#111827;\">${fmt(feelsLike, \"°C\")}</strong>\n            </div>\n          </div>\n        </div>\n\n        <!-- Stats Grid -->\n        <div style=\"margin-top:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;\">\n          <div style=\"background:#fafafa;border:1px solid #e5e7eb;border-radius:12px;padding:12px;\">\n            <div style=\"font-size:11px;color:#6b7280;\">Humidity</div>\n            <div style=\"margin-top:6px;font-size:16px;font-weight:900;\">${fmt(humidity, \"%\")}</div>\n          </div>\n\n          <div style=\"background:#fafafa;border:1px solid #e5e7eb;border-radius:12px;padding:12px;\">\n            <div style=\"font-size:11px;color:#6b7280;\">Wind Speed</div>\n            <div style=\"margin-top:6px;font-size:16px;font-weight:900;\">${fmt(windSpeed, \" m/s\")}</div>\n          </div>\n\n          <div style=\"background:#fafafa;border:1px solid #e5e7eb;border-radius:12px;padding:12px;\">\n            <div style=\"font-size:11px;color:#6b7280;\">Visibility</div>\n            <div style=\"margin-top:6px;font-size:16px;font-weight:900;\">${fmt(visibility, \" m\")}</div>\n          </div>\n\n          <div style=\"background:#fafafa;border:1px solid #e5e7eb;border-radius:12px;padding:12px;\">\n            <div style=\"font-size:11px;color:#6b7280;\">Pressure</div>\n            <div style=\"margin-top:6px;font-size:16px;font-weight:900;\">${fmt(pressure, \" hPa\")}</div>\n          </div>\n        </div>\n\n        <!-- Range + Gust -->\n        <div style=\"margin-top:14px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;\">\n          <div style=\"font-size:12px;color:#6b7280;margin-bottom:8px;\">Extra Details</div>\n          <div style=\"font-size:13px;line-height:1.7;color:#111827;\">\n            Temp Range: <strong>${fmt(tempMin, \"°C\")}</strong> – <strong>${fmt(tempMax, \"°C\")}</strong><br/>\n            Wind Gust: <strong>${fmt(windGust, \" m/s\")}</strong>\n          </div>\n        </div>\n\n        <!-- Alert -->\n        <div style=\"margin-top:14px;padding:12px;border-radius:12px;border:1px solid #bae6fd;background:#eff6ff;\">\n          <div style=\"font-size:12px;font-weight:900;color:#0b3b74;\">Alert Status</div>\n          <div style=\"margin-top:6px;font-size:13px;color:#111827;\">${alertLabel}</div>\n        </div>\n\n        <!-- Footer -->\n        <div style=\"margin-top:16px;font-size:11px;color:#9ca3af;line-height:1.6;\">\n          Generated automatically by n8n • This is your daily workflow weather status email.\n        </div>\n\n      </div>\n    </div>\n  </body>\n</html>`;\n})()}}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -1488,
+        864
+      ],
+      "id": "b53f181f-c97c-454e-a4ed-46243632e993",
+      "name": "Send email",
+      "webhookId": "86f6aeaf-7706-465d-865f-d71d696730ae",
+      "credentials": {
+        "smtp": {
+          "id": "gJUbm4ZXTORCwTEN",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f0ce6908-6d04-4ded-a4a5-e4cced6e991e",
+              "leftValue": "={{$json.error ? true : false}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1712,
+        768
+      ],
+      "id": "01489a83-edc3-4e82-9429-22ed12f4262d",
+      "name": "IF there was a supabase POST Error"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "cities",
+        "include": "allOtherFields",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -3152,
+        768
+      ],
+      "id": "e23eb68d-3bf7-4d98-9196-e5b36e30d25d",
+      "name": "Split Out"
+    }
+  ],
+  "pinData": {
+    "01 Cron": [
+      {
+        "json": {
+          "timestamp": "2025-12-25T23:05:49.368-06:00",
+          "Readable date": "December 25th 2025, 11:05:49 pm",
+          "Readable time": "11:05:49 pm",
+          "Day of week": "Thursday",
+          "Year": "2025",
+          "Month": "December",
+          "Day of month": "25",
+          "Hour": "23",
+          "Minute": "05",
+          "Second": "49",
+          "Timezone": "America/Chicago (UTC-06:00)"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "01 Cron": {
+      "main": [
+        [
+          {
+            "node": "02 Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Weather API Request": {
+      "main": [
+        [
+          {
+            "node": "04 Data Normalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Data Normalization": {
+      "main": [
+        [
+          {
+            "node": "05 Weather Alert Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Weather Alert Logic": {
+      "main": [
+        [
+          {
+            "node": "06 Summary Formatting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Summary Formatting": {
+      "main": [
+        [
+          {
+            "node": "07 Supabase Insert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Supabase Insert": {
+      "main": [
+        [
+          {
+            "node": "IF there was a supabase POST Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send email": {
+      "main": [
+        [
+          {
+            "node": "Logging Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF there was a supabase POST Error": {
+      "main": [
+        [
+          {
+            "node": "Logging Errors",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Config": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "03 Weather API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "42ec90cb-90f6-4f7b-879b-5d24942f5ade",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c28542ce3daa01e3a2b6edea212a946c699ea4fef3d5b51462f17dd0bd768871"
+  },
+  "id": "nYkIrY0uW9qwOx0p",
+  "tags": []
+}

@@ -1,0 +1,110 @@
+{
+  "name": "Weather – Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "b30a28c0-4dc7-4560-8838-cce8d22ce0e2",
+      "name": "Error Trigger"
+    },
+    {
+      "parameters": {
+        "fromEmail": "ayush975600@gmail.com",
+        "toEmail": "abhard24@uic.edu",
+        "subject": "=⚠️ n8n Workflow Failed: {{$json.workflow.name}}",
+        "html": "=<div style=\"font-family: Arial, Helvetica, sans-serif; color:#111; line-height:1.4;\">\n  <h2 style=\"margin:0 0 10px;\">🚨 n8n Workflow Failed</h2>\n\n  <p style=\"margin:0 0 14px;\">\n    An execution failed in n8n. Details are below:\n  </p>\n\n  <table cellpadding=\"8\" cellspacing=\"0\" border=\"0\"\n         style=\"border-collapse: collapse; width:100%; max-width:720px; border:1px solid #e5e5e5;\">\n    <tr style=\"background:#f7f7f7;\">\n      <td style=\"width:220px; font-weight:bold; border-bottom:1px solid #e5e5e5;\">Workflow</td>\n      <td style=\"border-bottom:1px solid #e5e5e5;\">\n        {{$json.workflow.name}} (ID: {{$json.workflow.id}})\n      </td>\n    </tr>\n    <tr>\n      <td style=\"font-weight:bold; border-bottom:1px solid #e5e5e5;\">Execution ID</td>\n      <td style=\"border-bottom:1px solid #e5e5e5;\">{{$json.execution.id}}</td>\n    </tr>\n    <tr style=\"background:#fcfcfc;\">\n      <td style=\"font-weight:bold; border-bottom:1px solid #e5e5e5;\">Mode</td>\n      <td style=\"border-bottom:1px solid #e5e5e5;\">{{$json.execution.mode}}</td>\n    </tr>\n    <tr>\n      <td style=\"font-weight:bold; border-bottom:1px solid #e5e5e5;\">Last Node Executed</td>\n      <td style=\"border-bottom:1px solid #e5e5e5;\">{{$json.execution.lastNodeExecuted}}</td>\n    </tr>\n    <tr style=\"background:#fff3f3;\">\n      <td style=\"font-weight:bold; border-bottom:1px solid #e5e5e5;\">Error Message</td>\n      <td style=\"border-bottom:1px solid #e5e5e5;\">\n        <span style=\"color:#b00020; font-weight:bold;\">{{$json.execution.error.message}}</span>\n      </td>\n    </tr>\n    <tr>\n      <td style=\"font-weight:bold;\">Execution Link</td>\n      <td>\n        <a href=\"{{$json.execution.url}}\" target=\"_blank\" style=\"color:#0b57d0; text-decoration:none;\">\n          Open execution in n8n\n        </a>\n      </td>\n    </tr>\n  </table>\n\n  <h3 style=\"margin:18px 0 8px;\">Stack Trace</h3>\n  <pre style=\"background:#111; color:#eee; padding:12px; border-radius:8px; overflow:auto; max-width:720px;\">\n{{$json.execution.error.stack}}\n  </pre>\n\n  <p style=\"margin:16px 0 0; font-size:12px; color:#666;\">\n    Sent automatically by your n8n Error Trigger workflow.\n  </p>\n</div>\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        416,
+        -128
+      ],
+      "id": "0d456168-f663-4c21-9ef2-79c09d41ab43",
+      "name": "Send email",
+      "webhookId": "f406cad9-dab3-47a4-b0c3-ad94279e4f56",
+      "credentials": {
+        "smtp": {
+          "id": "gJUbm4ZXTORCwTEN",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4fc8f404-fff9-44fb-be65-c09823e3932b",
+              "leftValue": "={{$json.workflow.id}}",
+              "rightValue": "1",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        208,
+        0
+      ],
+      "id": "055c3340-3119-4f5a-806f-2a966e9e0d15",
+      "name": "Checking Correct Workflow Error"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Checking Correct Workflow Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checking Correct Workflow Error": {
+      "main": [
+        [
+          {
+            "node": "Send email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "0dcdf490-f551-44f1-9dad-5d1bee975e7e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c28542ce3daa01e3a2b6edea212a946c699ea4fef3d5b51462f17dd0bd768871"
+  },
+  "id": "Uc3oSQXiODLfrUc8",
+  "tags": []
+}
